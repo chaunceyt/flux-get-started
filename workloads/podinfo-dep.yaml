@@ -48,6 +48,8 @@ spec:
         env:
         - name: PODINFO_UI_COLOR
           value: red
+        - name: PODINFO_UI_BGCOLOR
+          value: green
         livenessProbe:
           httpGet:
             path: /healthz
