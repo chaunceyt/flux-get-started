@@ -9,7 +9,7 @@ metadata:
   annotations:
     flux.weave.works/automated: "true"
     flux.weave.works/tag.init: regexp:^3.*
-    flux.weave.works/tag.podinfod: semver:~1.4
+    flux.weave.works/tag.podinfod: semver:~1.3
 spec:
   strategy:
     rollingUpdate:
@@ -33,7 +33,7 @@ spec:
         - "1"
       containers:
       - name: podinfod
-        image: stefanprodan/podinfo:v1.4.1
+        image: stefanprodan/podinfo:v1.3.0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9898
