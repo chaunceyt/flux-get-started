@@ -48,4 +48,4 @@ spec:
         - path: /
           backend:
             serviceName: podinfo-flux-dev
-            servicePort: 80
+            servicePort: 3000
