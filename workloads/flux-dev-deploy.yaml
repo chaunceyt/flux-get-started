@@ -31,4 +31,21 @@ spec:
       port: 3000
   selector:
     app: podinfo
-    
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: "podinfo-flux-dev.18.219.3.234.nip.io-weavescope"
+  namespace: flux-dev
+  labels:
+    app: weave-scope
+  annotations:
+spec:
+  rules:
+  - host: podinfo-flux-dev.18.219.3.234.nip.io
+    http:
+      paths:
+        - path: /
+          backend:
+            serviceName: podinfo-flux-dev
+            servicePort: 80
