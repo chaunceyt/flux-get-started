@@ -27,13 +27,13 @@ spec:
     spec:
       initContainers:
       - name: init
-        image: alpine:3.6
+        image: alpine:3.5
         command:
         - sleep
         - "2"
       containers:
       - name: podinfod
-        image: stefanprodan/podinfo:1.4.1
+        image: stefanprodan/podinfo:v1.4.1
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9898
@@ -51,7 +51,7 @@ spec:
         - name: PODINFO_UI_BGCOLOR
           value: green
         - name: PODINFO_TEAM
-          value: blue  
+          value: blue
         livenessProbe:
           httpGet:
             path: /healthz
