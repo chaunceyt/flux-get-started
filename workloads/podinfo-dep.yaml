@@ -50,6 +50,8 @@ spec:
           value: red
         - name: PODINFO_UI_BGCOLOR
           value: green
+        - name: PODINFO_TEAM
+          value: blue  
         livenessProbe:
           httpGet:
             path: /healthz
