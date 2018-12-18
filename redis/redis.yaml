@@ -1,0 +1,321 @@
+---
+# Source: redis/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-app
+  namespace: project1
+  labels:
+    app: redis
+    chart: redis-4.3.0
+    release: "redis-app"
+    heritage: "Tiller"
+type: Opaque
+data:
+  redis-password: "RzZRRFhGMnVYMw=="
+---
+# Source: redis/templates/health-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: redis
+    chart: redis-4.3.0
+    heritage: Tiller
+    release: redis-app
+  name: redis-app-health
+  namespace: project1
+data:
+  ping_local.sh: |-
+    response=$(
+      redis-cli \
+        -a $REDIS_PASSWORD \
+        -h localhost \
+        -p $REDIS_PORT \
+        ping
+    )
+    if [ "$response" != "PONG" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_master.sh: |-
+    response=$(
+      redis-cli \
+        -a $REDIS_MASTER_PASSWORD \
+        -h $REDIS_MASTER_HOST \
+        -p $REDIS_MASTER_PORT_NUMBER \
+        ping
+    )
+    if [ "$response" != "PONG" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_local_and_master.sh: |-
+    script_dir="$(dirname "$0")"
+    exit_status=0
+    "$script_dir/ping_local.sh" || exit_status=$?
+    "$script_dir/ping_master.sh" || exit_status=$?
+    exit $exit_status
+
+---
+# Source: redis/templates/redis-master-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-app-master
+  namespace: project1
+  labels:
+    app: redis
+    chart: redis-4.3.0
+    release: "redis-app"
+    heritage: "Tiller"
+spec:
+  type: ClusterIP
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+  selector:
+    app: redis
+    release: "redis-app"
+    role: master
+
+---
+# Source: redis/templates/redis-slave-svc.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-app-slave
+  namespace: project1
+  labels:
+    app: redis
+    chart: redis-4.3.0
+    release: "redis-app"
+    heritage: "Tiller"
+spec:
+  type: ClusterIP
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+  selector:
+    app: redis
+    release: "redis-app"
+    role: slave
+
+---
+# Source: redis/templates/redis-slave-deployment.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: redis-app-slave
+  namespace: project1
+  labels:
+    app: redis
+    chart: redis-4.3.0
+    release: "redis-app"
+    heritage: "Tiller"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+        release: "redis-app"
+        role: slave
+        app: redis
+  template:
+    metadata:
+      labels:
+        release: "redis-app"
+        chart: redis-4.3.0
+        role: slave
+        app: redis
+      annotations:
+        checksum/health: ff5185e27900a772d07864d7f931f957620056919def7320edc53c72cee9fe8f
+        checksum/configmap: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+        checksum/secret: 0a3ae58001a6a4be00216da766deb49be4fe0e5d515ffb612093886da896fa0e
+    spec:
+      securityContext:
+        fsGroup: 1001
+        runAsUser: 1001
+      serviceAccountName: "default"
+      containers:
+      - name: redis-app
+        image: docker.io/bitnami/redis:4.0.11
+        imagePullPolicy: "Always"
+        env:
+        - name: REDIS_REPLICATION_MODE
+          value: slave
+        - name: REDIS_MASTER_HOST
+          value: redis-app-master
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_MASTER_PORT_NUMBER
+          value: "6379"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-app
+              key: redis-password
+        - name: REDIS_MASTER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-app
+              key: redis-password
+        - name: REDIS_DISABLE_COMMANDS
+          value: FLUSHDB,FLUSHALL
+        ports:
+        - name: redis
+          containerPort: 6379
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_local_and_master.sh
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_local_and_master.sh
+        resources:
+          null
+
+        volumeMounts:
+        - name: health
+          mountPath: /health
+      volumes:
+      - name: health
+        configMap:
+          name: redis-app-health
+          defaultMode: 0755
+
+---
+# Source: redis/templates/redis-master-statefulset.yaml
+apiVersion: apps/v1beta2
+kind: StatefulSet
+metadata:
+  name: redis-app-master
+  namespace: project1
+  labels:
+    app: redis
+    chart: redis-4.3.0
+    release: "redis-app"
+    heritage: "Tiller"
+spec:
+  selector:
+    matchLabels:
+      release: "redis-app"
+      role: master
+      app: redis
+  serviceName: redis-app-master
+  template:
+    metadata:
+      labels:
+        release: "redis-app"
+        chart: redis-4.3.0
+        role: master
+        app: redis
+      annotations:
+        checksum/health: ff5185e27900a772d07864d7f931f957620056919def7320edc53c72cee9fe8f
+        checksum/configmap: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+        checksum/secret: bb4f5d9b6cd3fd9cecfea598483e973450302dabccef081bd232b3489f83abff
+    spec:
+      securityContext:
+        fsGroup: 1001
+        runAsUser: 1001
+      serviceAccountName: "default"
+      containers:
+      - name: redis-app
+        image: "docker.io/bitnami/redis:4.0.11"
+        imagePullPolicy: "Always"
+        env:
+        - name: REDIS_REPLICATION_MODE
+          value: master
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-app
+              key: redis-password
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_DISABLE_COMMANDS
+          value: FLUSHDB,FLUSHALL
+        ports:
+        - name: redis
+          containerPort: 6379
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_local.sh
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_local.sh
+        resources:
+          null
+
+        volumeMounts:
+        - name: health
+          mountPath: /health
+        - name: redis-data
+          mountPath: /bitnami/redis/data
+          subPath:
+      initContainers:
+      - name: volume-permissions
+        image: "docker.io/bitnami/minideb:latest"
+        imagePullPolicy: "IfNotPresent"
+        command: ["/bin/chown", "-R", "1001:1001", "/bitnami/redis/data"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: redis-data
+          mountPath: /bitnami/redis/data
+          subPath:
+      volumes:
+      - name: health
+        configMap:
+          name: redis-app-health
+          defaultMode: 0755
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app: "redis"
+          component: "master"
+          release: "redis-app"
+          heritage: "Tiller"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+  updateStrategy:
+    type: RollingUpdate
