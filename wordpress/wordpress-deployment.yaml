@@ -1,0 +1,494 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wordpress-project1
+---
+# Source: wordpress/charts/mariadb/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wordpress-dev-mariadb
+  namespace: wordpress-project1
+  labels:
+    app: "mariadb"
+    chart: mariadb-5.2.0
+    release: "wordpress-dev"
+    heritage: "Tiller"
+type: Opaque
+data:
+  mariadb-root-password: "ekJOdmVjdkZrRw=="
+
+  mariadb-password: "ZDVadUQ2QzdxZg=="
+---
+# Source: wordpress/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wordpress-dev-wordpress
+  namespace: wordpress-project1
+  labels:
+    app: wordpress-dev-wordpress
+    chart: "wordpress-4.0.0"
+    release: "wordpress-dev"
+    heritage: "Tiller"
+type: Opaque
+data:
+
+  wordpress-password: "cGFzc3dvcmQ="
+
+  smtp-password: ""
+
+---
+# Source: wordpress/charts/mariadb/templates/master-configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wordpress-dev-mariadb
+  namespace: wordpress-project1
+  labels:
+    app: mariadb
+    component: "master"
+    chart: mariadb-5.2.0
+    release: "wordpress-dev"
+    heritage: "Tiller"
+data:
+  my.cnf: |-
+    [mysqld]
+    skip-name-resolve
+    explicit_defaults_for_timestamp
+    basedir=/opt/bitnami/mariadb
+    port=3306
+    socket=/opt/bitnami/mariadb/tmp/mysql.sock
+    tmpdir=/opt/bitnami/mariadb/tmp
+    max_allowed_packet=16M
+    bind-address=0.0.0.0
+    pid-file=/opt/bitnami/mariadb/tmp/mysqld.pid
+    log-error=/opt/bitnami/mariadb/logs/mysqld.log
+    character-set-server=UTF8
+    collation-server=utf8_general_ci
+
+    [client]
+    port=3306
+    socket=/opt/bitnami/mariadb/tmp/mysql.sock
+    default-character-set=UTF8
+
+    [manager]
+    port=3306
+    socket=/opt/bitnami/mariadb/tmp/mysql.sock
+    pid-file=/opt/bitnami/mariadb/tmp/mysqld.pid
+---
+# Source: wordpress/charts/mariadb/templates/tests.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wordpress-dev-mariadb-tests
+  namespace: wordpress-project1
+data:
+  run.sh: |-
+    @test "Testing MariaDB is accessible" {
+      mysql -h wordpress-dev-mariadb -uroot -p$MARIADB_ROOT_PASSWORD -e 'show databases;'
+    }
+
+---
+# Source: wordpress/templates/pvc.yaml
+
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: wordpress-dev-wordpress
+  namespace: wordpress-project1
+  labels:
+    app: wordpress-dev-wordpress
+    chart: "wordpress-4.0.0"
+    release: "wordpress-dev"
+    heritage: "Tiller"
+spec:
+  accessModes:
+    - "ReadWriteOnce"
+  resources:
+    requests:
+      storage: "10Gi"
+---
+# Source: wordpress/charts/mariadb/templates/master-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-dev-mariadb
+  namespace: wordpress-project1
+  labels:
+    app: "mariadb"
+    component: "master"
+    chart: mariadb-5.2.0
+    release: "wordpress-dev"
+    heritage: "Tiller"
+spec:
+  type: ClusterIP
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+  selector:
+    app: "mariadb"
+    component: "master"
+    release: "wordpress-dev"
+
+---
+# Source: wordpress/templates/svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-dev-wordpress
+  namespace: wordpress-project1
+  labels:
+    app: wordpress-dev-wordpress
+    chart: "wordpress-4.0.0"
+    release: "wordpress-dev"
+    heritage: "Tiller"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: "Cluster"
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: https
+      port: 443
+      targetPort: https
+  selector:
+    app: wordpress-dev-wordpress
+
+---
+# Source: wordpress/charts/mariadb/templates/test-runner.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "wordpress-dev-mariadb-test-h9p9t"
+  namespace: wordpress-project1
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  initContainers:
+    - name: "test-framework"
+      image: "dduportal/bats:0.4.0"
+      command:
+        - "bash"
+        - "-c"
+        - |
+          set -ex
+          # copy bats to tools dir
+          cp -R /usr/local/libexec/ /tools/bats/
+      volumeMounts:
+      - mountPath: /tools
+        name: tools
+  containers:
+    - name: mariadb-test
+      image: docker.io/bitnami/mariadb:10.1.36-debian-9
+      imagePullPolicy: "IfNotPresent"
+      command: ["/tools/bats/bats", "-t", "/tests/run.sh"]
+      env:
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-dev-mariadb
+              key: mariadb-root-password
+      volumeMounts:
+      - mountPath: /tests
+        name: tests
+        readOnly: true
+      - mountPath: /tools
+        name: tools
+  volumes:
+  - name: tests
+    configMap:
+      name: wordpress-dev-mariadb-tests
+  - name: tools
+    emptyDir: {}
+  restartPolicy: Never
+
+---
+# Source: wordpress/templates/tests/test-mariadb-connection.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "wordpress-dev-credentials-test"
+  namespace: wordpress-project1
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  containers:
+  - name: wordpress-dev-credentials-test
+    image: docker.io/bitnami/wordpress:4.9.8
+    imagePullPolicy: "IfNotPresent"
+    env:
+      - name: MARIADB_HOST
+        value: wordpress-dev-mariadb
+      - name: MARIADB_PORT
+        value: "3306"
+      - name: WORDPRESS_DATABASE_NAME
+        value: "bitnami_wordpress"
+      - name: WORDPRESS_DATABASE_USER
+        value: "bn_wordpress"
+      - name: WORDPRESS_DATABASE_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: wordpress-dev-mariadb
+            key: mariadb-password
+    command: ["sh", "-c", "mysql --host=$MARIADB_HOST --port=$MARIADB_PORT --user=$WORDPRESS_DATABASE_USER --password=$WORDPRESS_DATABASE_PASSWORD"]
+  restartPolicy: Never
+
+---
+# Source: wordpress/templates/deployment.yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: wordpress-dev-wordpress
+  namespace: wordpress-project1
+  labels:
+    app: wordpress-dev-wordpress
+    chart: "wordpress-4.0.0"
+    release: "wordpress-dev"
+    heritage: "Tiller"
+spec:
+  selector:
+    matchLabels:
+      app: wordpress-dev-wordpress
+      release: "wordpress-dev"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: wordpress-dev-wordpress
+        chart: "wordpress-4.0.0"
+        release: "wordpress-dev"
+    spec:
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "status.localhost"
+      containers:
+      - name: wordpress
+        image: docker.io/bitnami/wordpress:4.9.8
+        imagePullPolicy: "IfNotPresent"
+        env:
+        - name: ALLOW_EMPTY_PASSWORD
+          value: "yes"
+        - name: MARIADB_HOST
+          value: wordpress-dev-mariadb
+        - name: MARIADB_PORT_NUMBER
+          value: "3306"
+        - name: WORDPRESS_DATABASE_NAME
+          value: "bitnami_wordpress"
+        - name: WORDPRESS_DATABASE_USER
+          value: "bn_wordpress"
+        - name: WORDPRESS_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-dev-mariadb
+              key: mariadb-password
+        - name: WORDPRESS_USERNAME
+          value: "admin"
+        - name: WORDPRESS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-dev-wordpress
+              key: wordpress-password
+        - name: WORDPRESS_EMAIL
+          value: "user@example.com"
+        - name: WORDPRESS_FIRST_NAME
+          value: "FirstName"
+        - name: WORDPRESS_LAST_NAME
+          value: "LastName"
+        - name: WORDPRESS_BLOG_NAME
+          value: "User's Blog!"
+        - name: WORDPRESS_TABLE_PREFIX
+          value: "wp_"
+        - name: SMTP_HOST
+          value:
+        - name: SMTP_PORT
+          value:
+        - name: SMTP_USER
+          value:
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-dev-wordpress
+              key: smtp-password
+        - name: SMTP_USERNAME
+          value:
+        - name: SMTP_PROTOCOL
+          value:
+        ports:
+        - name: http
+          containerPort: 80
+        - name: https
+          containerPort: 443
+        livenessProbe:
+          httpGet:
+            path: /wp-login.php
+            port: http
+          failureThreshold: 6
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+
+        readinessProbe:
+          httpGet:
+            path: /wp-login.php
+            port: http
+          failureThreshold: 6
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+
+        volumeMounts:
+        - mountPath: /bitnami/apache
+          name: wordpress-data
+          subPath: apache
+        - mountPath: /bitnami/wordpress
+          name: wordpress-data
+          subPath: wordpress
+        - mountPath: /bitnami/php
+          name: wordpress-data
+          subPath: php
+        resources:
+          requests:
+            cpu: 300m
+            memory: 512Mi
+
+      volumes:
+      - name: wordpress-data
+        persistentVolumeClaim:
+          claimName: wordpress-dev-wordpress
+
+
+---
+# Source: wordpress/charts/mariadb/templates/master-statefulset.yaml
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: wordpress-dev-mariadb
+  namespace: wordpress-project1
+  labels:
+    app: "mariadb"
+    chart: mariadb-5.2.0
+    component: "master"
+    release: "wordpress-dev"
+    heritage: "Tiller"
+spec:
+  selector:
+    matchLabels:
+      release: "wordpress-dev"
+      component: "master"
+      app: mariadb
+  serviceName: "wordpress-dev-mariadb"
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: "mariadb"
+        component: "master"
+        release: "wordpress-dev"
+        chart: mariadb-5.2.0
+    spec:
+      securityContext:
+        fsGroup: 1001
+        runAsUser: 1001
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: "mariadb"
+                  release: "wordpress-dev"
+      containers:
+      - name: "mariadb"
+        image: docker.io/bitnami/mariadb:10.1.36-debian-9
+        imagePullPolicy: "IfNotPresent"
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-dev-mariadb
+              key: mariadb-root-password
+        - name: MARIADB_USER
+          value: "bn_wordpress"
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wordpress-dev-mariadb
+              key: mariadb-password
+        - name: MARIADB_DATABASE
+          value: "bitnami_wordpress"
+        ports:
+        - name: mysql
+          containerPort: 3306
+        livenessProbe:
+          exec:
+            command: ["sh", "-c", "exec mysqladmin status -uroot -p$MARIADB_ROOT_PASSWORD"]
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "exec mysqladmin status -uroot -p$MARIADB_ROOT_PASSWORD"]
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          {}
+
+        volumeMounts:
+        - name: data
+          mountPath: /bitnami/mariadb
+        - name: config
+          mountPath: /opt/bitnami/mariadb/conf/my.cnf
+          subPath: my.cnf
+      volumes:
+        - name: config
+          configMap:
+            name: wordpress-dev-mariadb
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: "mariadb"
+          component: "master"
+          release: "wordpress-dev"
+          heritage: "Tiller"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: "wordpress-project-ing"
+  labels:
+    app: wordpress-dev-wordpress
+  annotations:
+spec:
+  rules:
+  - host: wordpress.18.218.26.201.nip.io
+    http:
+      paths:
+        - path: /
+          backend:
+            serviceName: wordpress-dev-wordpress
+            servicePort: 80
