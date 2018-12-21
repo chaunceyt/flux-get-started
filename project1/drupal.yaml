@@ -438,7 +438,7 @@ metadata:
   annotations:
 spec:
   rules:
-    - host: drupal8.18.218.200.124.nip.io
+    - host: drupal8.18.218.162.42.nip.io
       http:
         paths:
           - path: /
